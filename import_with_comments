@@ -1,0 +1,707 @@
+import asyncio
+import json
+import ssl
+import os
+import io
+import base64
+import mimetypes
+from datetime import datetime
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any, Tuple
+import aiohttp
+import configparser
+import pyodbc
+from pathlib import Path
+
+
+@dataclass
+class AuthenticationToken:
+    """Data class to hold iManage authentication token information"""
+    access_token: str
+    token_type: str
+    scope: str
+    refresh_token: str
+    expires_in: int
+
+
+@dataclass
+class DocumentImportInfo:
+    """Data class to hold document import information from database"""
+    record_id: str
+    source_file_path: str
+    target_folder_id: str
+    document_title: str
+    author: str
+    description: str
+    matter_id: str
+    document_type: str = "Document"
+    comments: str = ""
+    priority: str = "normal"
+    import_status: str = "pending"
+
+
+@dataclass
+class ImportResult:
+    """Data class to hold import operation results"""
+    record_id: str
+    source_file: str
+    success: bool
+    imanage_document_id: Optional[str] = None
+    error_message: Optional[str] = None
+    file_size: int = 0
+    import_time: Optional[datetime] = None
+
+
+class iManageFileImporter:
+    """
+    Class to import documents from Windows folders to iManage using database configuration
+    """
+    
+    def __init__(self, config_file: str = 'imanage_import_config.ini'):
+        """
+        Initialize the file importer with configuration
+        
+        Args:
+            config_file: Path to configuration file
+        """
+        self.config = configparser.ConfigParser()
+        self.config_file = config_file
+        self.access_token = None
+        self.server = None
+        self.database = None
+        self.import_results = []
+        self._load_or_create_config()
+        
+    def _load_or_create_config(self):
+        """Load configuration file or create template if it doesn't exist"""
+        if not os.path.exists(self.config_file):
+            self._create_config_template()
+            print(f"Configuration file '{self.config_file}' created.")
+            print("Please update it with your settings before running the import.")
+            return
+        
+        self.config.read(self.config_file)
+        
+    def _create_config_template(self):
+        """Create a configuration file template"""
+        config_content = """[iManage]
+# Your iManage server hostname (without https://)
+server = your-imanage-server.com
+
+# Your iManage database/library name
+database = your_database_name
+
+# Service account username
+username = your_service_account
+
+# Service account password
+password = your_password
+
+# REST API client ID
+rest_client_id = your_rest_client_id
+
+# REST API client secret
+rest_client_secret = your_rest_secret
+
+[Database]
+# SQL Server connection details
+sql_server = your_sql_server
+sql_database = your_sql_database
+sql_username = your_sql_username
+sql_password = your_sql_password
+
+# Use Windows Authentication (true/false)
+use_windows_auth = false
+
+# SQL query to get import information
+# Must return: record_id, source_file_path, target_folder_id, document_title, author, description, matter_id, document_type, comments, priority
+import_query = SELECT record_id, source_file_path, target_folder_id, document_title, author, description, matter_id, document_type, comments, priority FROM dbo.document_imports WHERE import_status = 'pending'
+
+# SQL query to update import status
+update_status_query = UPDATE dbo.document_imports SET import_status = ?, imanage_document_id = ?, error_message = ?, import_date = ? WHERE record_id = ?
+
+[Files]
+# Root directory for source files (will be prefixed to relative paths)
+source_root_directory = C:\\Documents\\ToImport
+
+# Allowed file extensions (comma-separated)
+allowed_extensions = .pdf,.docx,.doc,.txt,.xlsx,.xls,.pptx,.ppt,.msg,.eml
+
+# Maximum file size in MB
+max_file_size_mb = 100
+
+# Create backup copies before import (true/false)
+create_backup = true
+
+# Backup directory
+backup_directory = C:\\Documents\\Backup
+
+[Connection]
+# Connection timeout in seconds
+timeout = 60
+
+# Whether to verify SSL certificates
+verify_ssl = false
+
+# Batch size for processing multiple files
+batch_size = 10
+
+[Logging]
+# Enable detailed logging
+enable_logging = true
+
+# Log file directory
+log_directory = ./logs
+
+# Log file name pattern
+log_file_pattern = import_log_{date}.txt
+"""
+        with open(self.config_file, 'w') as f:
+            f.write(config_content)
+    
+    def _get_config_value(self, section: str, key: str, required: bool = True) -> str:
+        """Get configuration value with error handling"""
+        try:
+            value = self.config.get(section, key)
+            if required and (value.startswith('your_') or not value.strip()):
+                raise ValueError(f"Please update {section}.{key} in {self.config_file}")
+            return value
+        except Exception as e:
+            if required:
+                raise ValueError(f"Configuration error for {section}.{key}: {e}")
+            return ""
+    
+    def _setup_logging(self):
+        """Setup logging if enabled"""
+        if self.config.getboolean('Logging', 'enable_logging', fallback=True):
+            log_dir = self._get_config_value('Logging', 'log_directory', False) or './logs'
+            os.makedirs(log_dir, exist_ok=True)
+            
+            log_pattern = self._get_config_value('Logging', 'log_file_pattern', False) or 'import_log_{date}.txt'
+            log_file = log_pattern.format(date=datetime.now().strftime('%Y%m%d'))
+            self.log_file_path = os.path.join(log_dir, log_file)
+        else:
+            self.log_file_path = None
+    
+    def _log(self, message: str):
+        """Log message to console and file"""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_message = f"[{timestamp}] {message}"
+        print(log_message)
+        
+        if hasattr(self, 'log_file_path') and self.log_file_path:
+            try:
+                with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                    f.write(log_message + '\n')
+            except Exception as e:
+                print(f"⚠️  Logging error: {e}")
+    
+    def _get_database_connection_string(self) -> str:
+        """Build database connection string"""
+        server = self._get_config_value('Database', 'sql_server')
+        database = self._get_config_value('Database', 'sql_database')
+        use_windows_auth = self.config.getboolean('Database', 'use_windows_auth', fallback=False)
+        
+        if use_windows_auth:
+            return (f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                   f"SERVER={server};"
+                   f"DATABASE={database};"
+                   f"Trusted_Connection=yes;")
+        else:
+            username = self._get_config_value('Database', 'sql_username')
+            password = self._get_config_value('Database', 'sql_password')
+            return (f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                   f"SERVER={server};"
+                   f"DATABASE={database};"
+                   f"UID={username};"
+                   f"PWD={password};")
+    
+    def _create_ssl_context(self) -> ssl.SSLContext:
+        """Create SSL context based on configuration"""
+        ssl_context = ssl.create_default_context()
+        
+        verify_ssl = self.config.getboolean('Connection', 'verify_ssl', fallback=True)
+        if not verify_ssl:
+            self._log("⚠️  SSL certificate verification is DISABLED")
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+        return ssl_context
+    
+    async def authenticate(self) -> bool:
+        """Authenticate with iManage and store access token"""
+        self._log("🔐 Authenticating with iManage...")
+        
+        try:
+            self.server = self._get_config_value('iManage', 'server')
+            self.database = self._get_config_value('iManage', 'database')
+            username = self._get_config_value('iManage', 'username')
+            password = self._get_config_value('iManage', 'password')
+            client_id = self._get_config_value('iManage', 'rest_client_id')
+            client_secret = self._get_config_value('iManage', 'rest_client_secret')
+            timeout = self.config.getint('Connection', 'timeout', fallback=60)
+            
+            oauth_url = f"https://{self.server}/auth/oauth2/token"
+            
+            auth_data = {
+                'username': username,
+                'password': password,
+                'grant_type': 'password',
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': 'admin'
+            }
+            
+            ssl_context = self._create_ssl_context()
+            timeout_config = aiohttp.ClientTimeout(total=timeout)
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout_config
+            ) as session:
+                
+                async with session.post(oauth_url, data=auth_data) as response:
+                    if response.status == 200:
+                        auth_response = await response.json()
+                        token = AuthenticationToken(**auth_response)
+                        self.access_token = token.access_token
+                        self._log("✅ iManage authentication successful!")
+                        return True
+                    else:
+                        response_text = await response.text()
+                        self._log(f"❌ iManage authentication failed! Status: {response.status}")
+                        self._log(f"Response: {response_text}")
+                        return False
+                        
+        except Exception as e:
+            self._log(f"💥 Authentication error: {e}")
+            return False
+    
+    def get_import_list_from_database(self) -> List[DocumentImportInfo]:
+        """
+        Get list of documents to import from database
+        
+        Returns:
+            List of DocumentImportInfo objects
+        """
+        self._log("📊 Getting import list from database...")
+        
+        try:
+            connection_string = self._get_database_connection_string()
+            query = self._get_config_value('Database', 'import_query')
+            
+            import_list = []
+            
+            with pyodbc.connect(connection_string) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query)
+                
+                for row in cursor.fetchall():
+                    doc_info = DocumentImportInfo(
+                        record_id=str(row[0]) if row[0] else "",
+                        source_file_path=str(row[1]) if row[1] else "",
+                        target_folder_id=str(row[2]) if row[2] else "",
+                        document_title=str(row[3]) if row[3] else "",
+                        author=str(row[4]) if row[4] else "Unknown",
+                        description=str(row[5]) if row[5] else "",
+                        matter_id=str(row[6]) if row[6] else "",
+                        document_type=str(row[7]) if len(row) > 7 and row[7] else "Document",
+                        comments=str(row[8]) if len(row) > 8 and row[8] else "",
+                        priority=str(row[9]) if len(row) > 9 and row[9] else "normal"
+                    )
+                    import_list.append(doc_info)
+                
+                self._log(f"✅ Found {len(import_list)} documents to import")
+                return import_list
+                
+        except Exception as e:
+            self._log(f"💥 Database error: {e}")
+            return []
+    
+    def _validate_file(self, file_path: str) -> Tuple[bool, str]:
+        """
+        Validate file for import
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return False, f"File not found: {file_path}"
+        
+        # Check file extension
+        allowed_extensions = [ext.strip() for ext in self._get_config_value('Files', 'allowed_extensions', False).split(',')]
+        file_extension = Path(file_path).suffix.lower()
+        
+        if allowed_extensions and file_extension not in allowed_extensions:
+            return False, f"File extension {file_extension} not allowed"
+        
+        # Check file size
+        max_size_mb = self.config.getint('Files', 'max_file_size_mb', fallback=100)
+        file_size = os.path.getsize(file_path)
+        max_size_bytes = max_size_mb * 1024 * 1024
+        
+        if file_size > max_size_bytes:
+            return False, f"File size ({file_size / 1024 / 1024:.2f} MB) exceeds limit ({max_size_mb} MB)"
+        
+        return True, ""
+    
+    def _resolve_file_path(self, relative_path: str) -> str:
+        """
+        Resolve full file path from relative path
+        
+        Args:
+            relative_path: Relative or absolute file path
+            
+        Returns:
+            Full file path
+        """
+        if os.path.isabs(relative_path):
+            return relative_path
+        
+        root_dir = self._get_config_value('Files', 'source_root_directory', False)
+        if root_dir:
+            return os.path.join(root_dir, relative_path)
+        
+        return relative_path
+    
+    def _create_backup(self, source_file: str) -> bool:
+        """
+        Create backup copy of file before import
+        
+        Args:
+            source_file: Source file path
+            
+        Returns:
+            True if backup created successfully
+        """
+        try:
+            if not self.config.getboolean('Files', 'create_backup', fallback=False):
+                return True
+            
+            backup_dir = self._get_config_value('Files', 'backup_directory', False)
+            if not backup_dir:
+                return True
+            
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            source_path = Path(source_file)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_filename = f"{source_path.stem}_{timestamp}{source_path.suffix}"
+            backup_path = os.path.join(backup_dir, backup_filename)
+            
+            import shutil
+            shutil.copy2(source_file, backup_path)
+            
+            self._log(f"✅ Backup created: {backup_path}")
+            return True
+            
+        except Exception as e:
+            self._log(f"⚠️  Backup failed: {e}")
+            return False
+    
+    async def import_file_to_imanage(self, doc_info: DocumentImportInfo) -> ImportResult:
+        """
+        Import a single file to iManage
+        
+        Args:
+            doc_info: Document import information
+            
+        Returns:
+            ImportResult object
+        """
+        result = ImportResult(
+            record_id=doc_info.record_id,
+            source_file=doc_info.source_file_path,
+            success=False,
+            import_time=datetime.now()
+        )
+        
+        try:
+            # Resolve full file path
+            full_path = self._resolve_file_path(doc_info.source_file_path)
+            self._log(f"📤 Importing: {full_path}")
+            
+            # Validate file
+            is_valid, error_msg = self._validate_file(full_path)
+            if not is_valid:
+                result.error_message = error_msg
+                self._log(f"❌ Validation failed: {error_msg}")
+                return result
+            
+            # Create backup if configured
+            self._create_backup(full_path)
+            
+            # Read file content
+            with open(full_path, 'rb') as f:
+                file_content = f.read()
+            
+            result.file_size = len(file_content)
+            
+            # Encode content to base64
+            content_base64 = base64.b64encode(file_content).decode('utf-8')
+            
+            # Determine file extension and MIME type
+            file_path = Path(full_path)
+            file_extension = file_path.suffix[1:] if file_path.suffix else 'txt'
+            mime_type, _ = mimetypes.guess_type(full_path)
+            
+            # Prepare document data
+            document_data = {
+                "name": doc_info.document_title or file_path.stem,
+                "extension": file_extension,
+                "author": doc_info.author,
+                "type": doc_info.document_type,
+                "comment": doc_info.description,
+                "size": len(file_content),
+                "content": content_base64
+            }
+            
+            # Add custom fields if available
+            if doc_info.matter_id:
+                document_data["custom1"] = doc_info.matter_id
+            
+            if doc_info.comments:
+                document_data["custom2"] = doc_info.comments
+            
+            # API endpoint for document creation
+            create_url = f"https://{self.server}/work/api/v2/customers/1/libraries/{self.database}/folders/{doc_info.target_folder_id}/documents"
+            
+            headers = {
+                'X-Auth-Token': self.access_token,
+                'Content-Type': 'application/json'
+            }
+            
+            ssl_context = self._create_ssl_context()
+            timeout_config = aiohttp.ClientTimeout(total=120)  # Longer timeout for uploads
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout_config
+            ) as session:
+                
+                async with session.post(create_url, json=document_data, headers=headers) as response:
+                    response_text = await response.text()
+                    
+                    if response.status == 201:  # Created
+                        response_data = json.loads(response_text)
+                        document_id = response_data.get('id')
+                        
+                        result.success = True
+                        result.imanage_document_id = document_id
+                        
+                        self._log(f"✅ Import successful! Document ID: {document_id}")
+                        self._log(f"📁 Folder: {doc_info.target_folder_id}")
+                        self._log(f"📊 Size: {result.file_size / 1024:.2f} KB")
+                        
+                    else:
+                        result.error_message = f"HTTP {response.status}: {response_text}"
+                        self._log(f"❌ Import failed! Status: {response.status}")
+                        self._log(f"Response: {response_text}")
+                        
+        except Exception as e:
+            result.error_message = str(e)
+            self._log(f"💥 Import error: {e}")
+        
+        return result
+    
+    def update_database_status(self, result: ImportResult):
+        """
+        Update import status in database
+        
+        Args:
+            result: Import result to update
+        """
+        try:
+            connection_string = self._get_database_connection_string()
+            update_query = self._get_config_value('Database', 'update_status_query')
+            
+            status = 'completed' if result.success else 'failed'
+            
+            with pyodbc.connect(connection_string) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    update_query,
+                    status,
+                    result.imanage_document_id,
+                    result.error_message,
+                    result.import_time,
+                    result.record_id
+                )
+                conn.commit()
+                
+                self._log(f"✅ Database updated for record: {result.record_id}")
+                
+        except Exception as e:
+            self._log(f"💥 Database update error: {e}")
+    
+    async def import_all_documents(self) -> List[ImportResult]:
+        """
+        Import all pending documents from database
+        
+        Returns:
+            List of ImportResult objects
+        """
+        self._setup_logging()
+        self._log("🚀 Starting document import process...")
+        
+        # Authenticate with iManage
+        if not await self.authenticate():
+            self._log("❌ Authentication failed. Aborting import.")
+            return []
+        
+        # Get import list from database
+        import_list = self.get_import_list_from_database()
+        if not import_list:
+            self._log("📭 No documents to import.")
+            return []
+        
+        batch_size = self.config.getint('Connection', 'batch_size', fallback=10)
+        results = []
+        
+        self._log(f"📦 Processing {len(import_list)} documents in batches of {batch_size}")
+        
+        # Process in batches
+        for i in range(0, len(import_list), batch_size):
+            batch = import_list[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            
+            self._log(f"🔄 Processing batch {batch_num} ({len(batch)} documents)...")
+            
+            # Process each document in the batch
+            for doc_info in batch:
+                self._log(f"📄 Processing: {doc_info.document_title} (ID: {doc_info.record_id})")
+                
+                result = await self.import_file_to_imanage(doc_info)
+                results.append(result)
+                
+                # Update database status
+                self.update_database_status(result)
+                
+                # Small delay between imports
+                await asyncio.sleep(1)
+            
+            self._log(f"✅ Batch {batch_num} completed")
+            
+            # Delay between batches
+            if i + batch_size < len(import_list):
+                await asyncio.sleep(2)
+        
+        # Generate summary
+        successful = sum(1 for r in results if r.success)
+        failed = len(results) - successful
+        total_size = sum(r.file_size for r in results) / 1024 / 1024
+        
+        self._log("=" * 60)
+        self._log("📊 IMPORT SUMMARY")
+        self._log(f"✅ Successful: {successful}")
+        self._log(f"❌ Failed: {failed}")
+        self._log(f"📊 Total files: {len(results)}")
+        self._log(f"💾 Total size: {total_size:.2f} MB")
+        self._log("=" * 60)
+        
+        self.import_results = results
+        return results
+    
+    def generate_import_report(self) -> str:
+        """
+        Generate a detailed import report
+        
+        Returns:
+            Report as string
+        """
+        if not self.import_results:
+            return "No import results available."
+        
+        report_lines = []
+        report_lines.append("iManage Document Import Report")
+        report_lines.append("=" * 60)
+        report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        report_lines.append("")
+        
+        successful = [r for r in self.import_results if r.success]
+        failed = [r for r in self.import_results if not r.success]
+        
+        report_lines.append("SUMMARY")
+        report_lines.append("-" * 30)
+        report_lines.append(f"Total documents processed: {len(self.import_results)}")
+        report_lines.append(f"Successful imports: {len(successful)}")
+        report_lines.append(f"Failed imports: {len(failed)}")
+        report_lines.append(f"Success rate: {len(successful)/len(self.import_results)*100:.1f}%")
+        report_lines.append("")
+        
+        if successful:
+            report_lines.append("SUCCESSFUL IMPORTS")
+            report_lines.append("-" * 30)
+            for result in successful:
+                report_lines.append(f"✅ {result.source_file}")
+                report_lines.append(f"   iManage ID: {result.imanage_document_id}")
+                report_lines.append(f"   Size: {result.file_size / 1024:.2f} KB")
+                report_lines.append("")
+        
+        if failed:
+            report_lines.append("FAILED IMPORTS")
+            report_lines.append("-" * 30)
+            for result in failed:
+                report_lines.append(f"❌ {result.source_file}")
+                report_lines.append(f"   Error: {result.error_message}")
+                report_lines.append("")
+        
+        return "\n".join(report_lines)
+
+
+async def main():
+    """
+    Main function to run the file import process
+    """
+    print("🚀 iManage File Importer")
+    print("=" * 60)
+    
+    # Create importer
+    importer = iManageFileImporter()
+    
+    # Run import process
+    results = await importer.import_all_documents()
+    
+    # Generate and display report
+    if results:
+        print("\n" + importer.generate_import_report())
+        
+        # Save report to file
+        report_file = f"import_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write(importer.generate_import_report())
+        print(f"📄 Detailed report saved to: {report_file}")
+
+
+if __name__ == "__main__":
+    """
+    Run this script to import documents from Windows folders to iManage
+    
+    Required packages:
+    pip install aiohttp configparser pyodbc
+    
+    Database Schema Example:
+    CREATE TABLE document_imports (
+        record_id VARCHAR(50) PRIMARY KEY,
+        source_file_path VARCHAR(500),
+        target_folder_id VARCHAR(50),
+        document_title VARCHAR(200),
+        author VARCHAR(100),
+        description TEXT,
+        matter_id VARCHAR(50),
+        document_type VARCHAR(50),
+        comments TEXT,
+        priority VARCHAR(20),
+        import_status VARCHAR(20) DEFAULT 'pending',
+        imanage_document_id VARCHAR(50),
+        error_message TEXT,
+        import_date DATETIME
+    );
+    """
+    asyncio.run(main())
