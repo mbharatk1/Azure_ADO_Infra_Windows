@@ -1,0 +1,228 @@
+using System;
+using System.Configuration;
+using System.Data.SQLite;
+
+namespace SimpleConfigReader
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("📖 Simple App.config Reader");
+            Console.WriteLine("============================");
+            Console.WriteLine();
+
+            // sq lite file 
+            //string databasePath = @"C:\Users\mbhar\Downloads\chinook\chinook.db";
+
+            try
+            {
+                // Read variables from app.config
+                string applicationName = ConfigurationManager.AppSettings["ApplicationName"];
+                string version = ConfigurationManager.AppSettings["Version"];
+                string environment = ConfigurationManager.AppSettings["Environment"];
+                string maxUsers = ConfigurationManager.AppSettings["MaxUsers"];
+                string enableLogging = ConfigurationManager.AppSettings["EnableLogging"];
+                string databasePath = ConfigurationManager.AppSettings["DbFilePath"];
+
+
+
+                // Display the variables
+                Console.WriteLine("Configuration Variables:");
+                Console.WriteLine($" Application Name: {applicationName ?? "Not configured"}");
+                Console.WriteLine($" Version: {version ?? "Not configured"}");
+                Console.WriteLine($" Environment: {environment ?? "Not configured"}");
+                Console.WriteLine($" Max Users: {maxUsers ?? "Not configured"}");
+                Console.WriteLine($" Enable Logging: {enableLogging ?? "Not configured"}");
+
+                Console.WriteLine();
+
+                // Read connection string
+                string connectionString = ConfigurationManager.ConnectionStrings["DatabaseConnection"]?.ConnectionString;
+                Console.WriteLine($" Database Connection: {connectionString ?? "Not configured"}");
+
+                Console.WriteLine();
+                Console.WriteLine(" Configuration read successfully!");
+
+                if (!File.Exists(databasePath))
+                {
+                    Console.WriteLine($" Database file not found: {databasePath}");
+                    Console.WriteLine("Please make sure sample.db exists in the current directory.");
+                    return;
+                }
+
+                // Read and display table names
+                DisplayTableNames(databasePath);
+
+                // Check for employees table and display data
+                CheckAndDisplayEmployeeData(databasePath);
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($" Error reading configuration: {ex.Message}");
+            }
+
+            Console.WriteLine();
+        }
+
+        static void DisplayTableNames(string databasePath)
+        {
+            string connectionString = $"Data Source={databasePath};Version=3;";
+
+            using (var connection = new SQLiteConnection(connectionString))
+            {
+                connection.Open();
+
+                // Query to get all table names
+                string query = @"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+
+                using (var command = new SQLiteCommand(query, connection))
+                using (var reader = command.ExecuteReader())
+                {
+                    Console.WriteLine("Table Names:");
+                    Console.WriteLine("------------");
+
+                    int count = 0;
+                    while (reader.Read())
+                    {
+                        count++;
+                        string tableName = reader.GetString(0);
+                        Console.WriteLine($"{count}. {tableName}");
+                    }
+
+                    if (count == 0)
+                    {
+                        Console.WriteLine("No tables found in the database.");
+                    }
+                    else
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine($"Total tables: {count}");
+                    }
+                }
+            }
+        }
+
+
+        static void CheckAndDisplayEmployeeData(string databasePath)
+        {
+            string connectionString = $"Data Source={databasePath};Version=3;";
+
+            using (var connection = new SQLiteConnection(connectionString))
+            {
+                connection.Open();
+
+                // Check if employee table exists (case-insensitive)
+                string checkTableQuery = @"
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND LOWER(name) = 'employee' OR LOWER(name) = 'employees'";
+
+                string employeeTableName = null;
+
+                using (var command = new SQLiteCommand(checkTableQuery, connection))
+                using (var reader = command.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        employeeTableName = reader.GetString(0);
+                    }
+                }
+
+                Console.WriteLine();
+                Console.WriteLine("👥 Employee Table Check:");
+                Console.WriteLine("------------------------");
+
+                if (employeeTableName != null)
+                {
+                    Console.WriteLine($" Found employee table: '{employeeTableName}'");
+                    DisplayEmployeeData(connection, employeeTableName);
+                }
+                else
+                {
+                    Console.WriteLine(" No employee table found.");
+                }
+            }
+        }
+
+       static void DisplayEmployeeData(SQLiteConnection connection, string tableName)
+        {
+            Console.WriteLine();
+            Console.WriteLine($" First 10 Records from '{tableName}' Table:");
+           
+            // Get column information first
+            string columnQuery = $"PRAGMA table_info([{tableName}])";
+            var columns = new System.Collections.Generic.List<string>();
+
+            using (var command = new SQLiteCommand(columnQuery, connection))
+            using (var reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    columns.Add(reader.GetString(1)); // Column name
+                }
+            }
+
+            // Get row count
+            string countQuery = $"SELECT COUNT(*) FROM [{tableName}]";
+            int totalRows;
+            using (var command = new SQLiteCommand(countQuery, connection))
+            {
+                totalRows = Convert.ToInt32(command.ExecuteScalar());
+            }
+
+            Console.WriteLine($"📈 Total rows in table: {totalRows}");
+            Console.WriteLine($"📋 Columns: {string.Join(", ", columns)}");
+            Console.WriteLine();
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("   (No data in the table)");
+                return;
+            }
+
+            // Select first 10 records
+            string dataQuery = $"SELECT * FROM [{tableName}] LIMIT 10";
+
+            using (var command = new SQLiteCommand(dataQuery, connection))
+            using (var reader = command.ExecuteReader())
+            {
+                // Display column headers
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    Console.Write($"{reader.GetName(i),-15} ");
+                }
+                Console.WriteLine();
+                Console.WriteLine(new string('-', reader.FieldCount * 16));
+
+                // Display data rows
+                int rowCount = 0;
+                while (reader.Read() && rowCount < 10)
+                {
+                    rowCount++;
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        string value = reader.IsDBNull(i) ? "NULL" : reader[i].ToString();
+                        
+                        // Truncate long values for display
+                        if (value.Length > 14)
+                            value = value.Substring(0, 11) + "...";
+                            
+                        Console.Write($"{value,-15} ");
+                    }
+                    Console.WriteLine();
+                }
+
+                Console.WriteLine();
+                Console.WriteLine($"📊 Displayed {rowCount} of {totalRows} total records");
+                
+                if (totalRows > 10)
+                {
+                    Console.WriteLine($"   ({totalRows - 10} more records available)");
+                }
+            }
+        }
+
+
+    }
+}
