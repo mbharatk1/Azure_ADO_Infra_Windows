@@ -1,0 +1,301 @@
+import asyncio
+import json
+import ssl
+from datetime import datetime
+from dataclasses import dataclass
+from typing import Optional
+import aiohttp
+import configparser
+import os
+
+
+@dataclass
+class AuthenticationToken:
+    """Data class to hold iManage authentication token information"""
+    access_token: str
+    token_type: str
+    scope: str
+    refresh_token: str
+    expires_in: int
+
+
+class iManageConnectionChecker:
+    """
+    A simple class to test connectivity to iManage Work API
+    """
+    
+    def __init__(self, config_file: str = 'imanage_config.ini'):
+        """
+        Initialize the connection checker with configuration
+        
+        Args:
+            config_file: Path to configuration file
+        """
+        self.config = configparser.ConfigParser()
+        self.config_file = config_file
+        self._load_or_create_config()
+        
+    def _load_or_create_config(self):
+        """Load configuration file or create template if it doesn't exist"""
+        if not os.path.exists(self.config_file):
+            self._create_config_template()
+            print(f"Configuration file '{self.config_file}' created.")
+            print("Please update it with your iManage settings before running the connection test.")
+            return
+        
+        self.config.read(self.config_file)
+        
+    def _create_config_template(self):
+        """Create a configuration file template"""
+        config_content = """[iManage]
+# Your iManage server hostname (without https://)
+server = your-imanage-server.com
+
+# Your iManage database/library name
+database = your_database_name
+
+# Service account username
+username = your_service_account
+
+# Service account password
+password = your_password
+
+# REST API client ID
+rest_client_id = your_rest_client_id
+
+# REST API client secret
+rest_client_secret = your_rest_secret
+
+[Connection]
+# Connection timeout in seconds
+timeout = 30
+
+# Whether to verify SSL certificates (set to false for testing)
+verify_ssl = false
+"""
+        with open(self.config_file, 'w') as f:
+            f.write(config_content)
+    
+    def _get_config_value(self, section: str, key: str) -> str:
+        """
+        Get configuration value with error handling
+        
+        Args:
+            section: Configuration section name
+            key: Configuration key name
+            
+        Returns:
+            Configuration value
+            
+        Raises:
+            ValueError: If configuration value is missing or invalid
+        """
+        try:
+            value = self.config.get(section, key)
+            if value.startswith('your_') or not value.strip():
+                raise ValueError(f"Please update {section}.{key} in {self.config_file}")
+            return value
+        except Exception as e:
+            raise ValueError(f"Configuration error for {section}.{key}: {e}")
+    
+    def _create_ssl_context(self) -> ssl.SSLContext:
+        """
+        Create SSL context based on configuration
+        
+        Returns:
+            SSL context for HTTP connections
+        """
+        ssl_context = ssl.create_default_context()
+        
+        # Check if SSL verification should be disabled
+        verify_ssl = self.config.getboolean('Connection', 'verify_ssl', fallback=True)
+        if not verify_ssl:
+            print("⚠️  SSL certificate verification is DISABLED")
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+        return ssl_context
+    
+    async def test_connection(self) -> bool:
+        """
+        Test connection to iManage and authenticate
+        
+        Returns:
+            True if connection successful, False otherwise
+        """
+        print("🔄 Starting iManage connection test...")
+        print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        try:
+            # Get configuration values
+            server = self._get_config_value('iManage', 'server')
+            username = self._get_config_value('iManage', 'username')
+            password = self._get_config_value('iManage', 'password')
+            client_id = self._get_config_value('iManage', 'rest_client_id')
+            client_secret = self._get_config_value('iManage', 'rest_client_secret')
+            timeout = self.config.getint('Connection', 'timeout', fallback=30)
+            
+            print(f"🌐 Connecting to: {server}")
+            print(f"👤 Username: {username}")
+            
+            # Build OAuth URL
+            oauth_url = f"https://{server}/auth/oauth2/token"
+            
+            # Prepare authentication request
+            auth_data = {
+                'username': username,
+                'password': password,
+                'grant_type': 'password',
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': 'admin'
+            }
+            
+            # Create SSL context
+            ssl_context = self._create_ssl_context()
+            
+            # Create HTTP session with timeout
+            timeout_config = aiohttp.ClientTimeout(total=timeout)
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout_config
+            ) as session:
+                
+                print("🔐 Attempting authentication...")
+                
+                # Make authentication request
+                async with session.post(oauth_url, data=auth_data) as response:
+                    response_text = await response.text()
+                    
+                    if response.status == 200:
+                        # Parse authentication response
+                        auth_response = json.loads(response_text)
+                        token = AuthenticationToken(**auth_response)
+                        
+                        print("✅ Authentication successful!")
+                        print(f"🎫 Token type: {token.token_type}")
+                        print(f"📝 Scope: {token.scope}")
+                        print(f"⏳ Expires in: {token.expires_in} seconds")
+                        print(f"🔑 Access token (first 20 chars): {token.access_token[:20]}...")
+                        
+                        # Test a simple API call to verify the token works
+                        await self._test_api_call(session, server, token.access_token)
+                        
+                        return True
+                    
+                    else:
+                        print(f"❌ Authentication failed!")
+                        print(f"📊 HTTP Status: {response.status}")
+                        print(f"📄 Response: {response_text}")
+                        return False
+                        
+        except ValueError as e:
+            print(f"⚙️  Configuration Error: {e}")
+            return False
+        except aiohttp.ClientError as e:
+            print(f"🌐 Network Error: {e}")
+            return False
+        except json.JSONDecodeError as e:
+            print(f"📄 JSON Parse Error: {e}")
+            return False
+        except Exception as e:
+            print(f"💥 Unexpected Error: {e}")
+            return False
+    
+    async def _test_api_call(self, session: aiohttp.ClientSession, server: str, access_token: str):
+        """
+        Test a simple API call to verify the token is working
+        
+        Args:
+            session: HTTP session
+            server: iManage server
+            access_token: Authentication token
+        """
+        try:
+            database = self._get_config_value('iManage', 'database')
+            
+            # Test API endpoint - get library information
+            api_url = f"https://{server}/work/api/v2/customers/1/libraries/{database}"
+            headers = {'X-Auth-Token': access_token}
+            
+            print("🧪 Testing API call...")
+            
+            async with session.get(api_url, headers=headers) as response:
+                if response.status == 200:
+                    library_info = await response.json()
+                    print("✅ API test successful!")
+                    print(f"📚 Library name: {library_info.get('name', 'Unknown')}")
+                    print(f"🆔 Library ID: {library_info.get('id', 'Unknown')}")
+                else:
+                    response_text = await response.text()
+                    print(f"⚠️  API test failed (Status: {response.status})")
+                    print(f"📄 Response: {response_text}")
+                    
+        except Exception as e:
+            print(f"🧪 API test error: {e}")
+    
+    def get_connection_info(self) -> dict:
+        """
+        Get current connection configuration (without sensitive data)
+        
+        Returns:
+            Dictionary with connection information
+        """
+        try:
+            return {
+                'server': self._get_config_value('iManage', 'server'),
+                'database': self._get_config_value('iManage', 'database'),
+                'username': self._get_config_value('iManage', 'username'),
+                'timeout': self.config.getint('Connection', 'timeout', fallback=30),
+                'verify_ssl': self.config.getboolean('Connection', 'verify_ssl', fallback=True)
+            }
+        except Exception as e:
+            return {'error': str(e)}
+
+
+async def main():
+    """
+    Main function to run the connection test
+    """
+    print("🚀 iManage Connection Checker")
+    print("=" * 50)
+    
+    # Create connection checker
+    checker = iManageConnectionChecker()
+    
+    # Show current configuration
+    config_info = checker.get_connection_info()
+    if 'error' in config_info:
+        print(f"❌ Configuration Error: {config_info['error']}")
+        print("Please update your configuration file and try again.")
+        return
+    
+    print("📋 Current Configuration:")
+    for key, value in config_info.items():
+        if key != 'error':
+            print(f"   {key}: {value}")
+    print()
+    
+    # Test connection
+    success = await checker.test_connection()
+    
+    print()
+    print("=" * 50)
+    if success:
+        print("🎉 Connection test completed successfully!")
+        print("You can now use this configuration for your iManage integration.")
+    else:
+        print("💥 Connection test failed!")
+        print("Please check your configuration and network connectivity.")
+
+
+if __name__ == "__main__":
+    """
+    Run this script to test your iManage connection
+    
+    Required packages:
+    pip install aiohttp configparser
+    """
+    asyncio.run(main())
