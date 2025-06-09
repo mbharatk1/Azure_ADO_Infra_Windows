@@ -1,0 +1,76 @@
+<#  
+    Purpose:  
+    This PowerShell script authenticates with the iManage API using OAuth2, retrieves an access token,  
+    and then fetches the document path for a specified document ID from the iManage Work system.  
+    It includes error handling and logs each step for debugging and tracking.  
+#>
+
+# Define variables for API and authentication
+$workServer = "your-imanage-instance.com"
+$oauthUri = "https://$workServer/auth/oauth2/token"
+$documentId = "112233"
+$libraryId = "CH"
+$customerId = "1"
+
+# Authentication credentials (Replace with actual values)
+$clientId = "YOUR_CLIENT_ID"
+$clientSecret = "YOUR_CLIENT_SECRET"
+$username = "YOUR_USERNAME"
+$password = "YOUR_PASSWORD"
+
+# Log file location
+$logFile = "C:\Logs\iManage_API_Log.txt"
+
+# Function to log messages with timestamp
+Function Write-Log {
+    param ([string]$message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $logFile -Value "$timestamp - $message"
+}
+
+Write-Log "Starting script execution..."
+
+# Create authentication request body
+$authBody = @{
+    "username"     = $username
+    "password"     = $password
+    "grant_type"   = "password"
+    "client_id"    = $clientId
+    "client_secret"= $clientSecret
+    "scope"        = "admin"
+}
+
+# Try to obtain OAuth Token
+try {
+    Write-Log "Requesting OAuth Token..."
+    $tokenResponse = Invoke-RestMethod -Uri $oauthUri -Method Post -Body $authBody -ContentType "application/x-www-form-urlencoded"
+    $accessToken = $tokenResponse.access_token
+    Write-Log "OAuth Token retrieved successfully."
+}
+catch {
+    Write-Log "ERROR: Failed to retrieve OAuth Token - $_"
+    Exit 1
+}
+
+# Define API endpoint to get document path
+$apiUrl = "https://$workServer/work/api/v2/customers/$customerId/libraries/$libraryId/documents/$documentId/path"
+
+# Set up headers for API request
+$headers = @{
+    "Authorization" = "Bearer $accessToken"
+    "Accept"        = "application/json"
+}
+
+# Try to fetch document path
+try {
+    Write-Log "Requesting document path..."
+    $documentPathResponse = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers $headers
+    Write-Log "Document path retrieved successfully."
+    Write-Log "Document Path: $($documentPathResponse)"
+}
+catch {
+    Write-Log "ERROR: Failed to retrieve document path - $_"
+    Exit 1
+}
+
+Write-Log "Script execution completed successfully."
