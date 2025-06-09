@@ -1,37 +1,73 @@
 <#  
     Purpose:  
-    This PowerShell script uploads a document to iManage Work and adds comments.  
-    It authenticates using OAuth2, retrieves an access token, and then uploads the file.  
+    This PowerShell script uploads a document to the "Documents" folder within a specific Matter workspace in iManage Work.  
+    It reads credentials from a parameter file, authenticates with iManage Work using OAuth2, retrieves workspace and folder details,  
+    and uploads the document with comments. The script includes error handling and logging.
+
+    **Sample `params.txt` file format (stored at `C:\Config\params.txt`):**
+    ---------------------------------------------------
+    username=ABC
+    password=yourpassword
+    client_id=CLIENT123
+    client_secret=SECRET456
+    work_server=your-imanage-instance.com
+    matter_id=ID-1
+    workspace_name=Matter 1
+    folder_name=Documents
+    ---------------------------------------------------
+
+    **Prerequisites:**  
+    1. Ensure you have **PowerShell 7 or later** installed.  
+    2. Obtain **API credentials** (client ID, client secret, username, password).  
+    3. Ensure **network access** to iManage Work API.  
+    4. Create and save `params.txt` with credentials in `C:\Config\params.txt`.  
+    5. Set execution policy if needed:
+       ```powershell
+       Set-ExecutionPolicy Unrestricted -Scope Process
+       ```
+    6. Run the script using:
+       ```powershell
+       .\imanage_upload.ps1
+       ```
 #>
 
-# Define variables
-$workServer = "your-imanage-instance.com"
+# Define the parameter file path
+$paramFile = "C:\Config\params.txt"
+
+# Read the parameter file and convert to a Hashtable
+$parameters = @{}
+
+Get-Content $paramFile | ForEach-Object {
+    $key, $value = $_.Split("=")
+    $parameters[$key.Trim()] = $value.Trim()
+}
+
+# Extract parameters for use in the script
+$username = $parameters["username"]
+$password = $parameters["password"]
+$clientId = $parameters["client_id"]
+$clientSecret = $parameters["client_secret"]
+$workServer = $parameters["work_server"]
+$matterId = $parameters["matter_id"]
+$workspaceName = $parameters["workspace_name"]
+$folderName = $parameters["folder_name"]
+
+# Define iManage authentication URL
 $oauthUri = "https://$workServer/auth/oauth2/token"
-$uploadUrl = "https://$workServer/work/api/v2/customers/1/libraries/CH/documents"
-
-# Authentication credentials (Replace with actual values)
-$clientId = "YOUR_CLIENT_ID"
-$clientSecret = "YOUR_CLIENT_SECRET"
-$username = "YOUR_USERNAME"
-$password = "YOUR_PASSWORD"
-
-# Document details
-$filePath = "C:\FOLDER1\XXX"
-$comments = "This is a test upload with comments."
 
 # Log file location
 $logFile = "C:\Logs\iManage_API_Log.txt"
 
-# Function to log messages
+# Function to log messages with timestamp
 Function Write-Log {
     param ([string]$message)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Add-Content -Path $logFile -Value "$timestamp - $message"
 }
 
-Write-Log "Starting script execution..."
+Write-Log "Starting iManage document upload script..."
 
-# Request body for OAuth token
+# Step 1: Authenticate and retrieve OAuth Token
 $authBody = @{
     "username"     = $username
     "password"     = $password
@@ -41,7 +77,6 @@ $authBody = @{
     "scope"        = "admin"
 }
 
-# Try to obtain OAuth Token
 try {
     Write-Log "Requesting OAuth Token..."
     $tokenResponse = Invoke-RestMethod -Uri $oauthUri -Method Post -Body $authBody -ContentType "application/x-www-form-urlencoded"
@@ -53,18 +88,48 @@ catch {
     Exit 1
 }
 
-# Prepare file upload
+# Step 2: Get workspace details
+$workspaceUrl = "https://$workServer/work/api/v2/customers/1/libraries/CH/workspaces?name=$workspaceName"
 $headers = @{
     "Authorization" = "Bearer $accessToken"
     "Accept"        = "application/json"
 }
+
+try {
+    Write-Log "Fetching workspace details..."
+    $workspaceResponse = Invoke-RestMethod -Uri $workspaceUrl -Method Get -Headers $headers
+    $workspaceId = $workspaceResponse.id
+    Write-Log "Workspace ID retrieved: $workspaceId"
+}
+catch {
+    Write-Log "ERROR: Failed to retrieve workspace details - $_"
+    Exit 1
+}
+
+# Step 3: Get folder details for "Documents"
+$folderUrl = "https://$workServer/work/api/v2/customers/1/libraries/CH/workspaces/$workspaceId/folders?name=$folderName"
+
+try {
+    Write-Log "Fetching folder details..."
+    $folderResponse = Invoke-RestMethod -Uri $folderUrl -Method Get -Headers $headers
+    $folderId = $folderResponse.id
+    Write-Log "Folder ID retrieved: $folderId"
+}
+catch {
+    Write-Log "ERROR: Failed to retrieve folder details - $_"
+    Exit 1
+}
+
+# Step 4: Prepare and upload the document
+$uploadUrl = "https://$workServer/work/api/v2/customers/1/libraries/CH/folders/$folderId/documents"
+$filePath = "C:\FOLDER1\XXX"
+$comments = "Uploading document to the Documents folder."
 
 $uploadBody = @{
     "name" = "XXX"
     "comments" = $comments
 }
 
-# Try uploading the document
 try {
     Write-Log "Uploading document..."
     $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
