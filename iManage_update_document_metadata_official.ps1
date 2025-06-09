@@ -1,3 +1,5 @@
+# taken from -- https://help.imanage.com/hc/en-us/articles/10383466969115-How-to-update-document-metadata-using-Powershell-and-the-Universal-API
+
 # Update a list of documents' metadata leveraging this endpoint: https://help.imanage.com/hc/en-us/articles/4412558535067-iManage-Work-Universal-API-Reference-Guide-REST-v2-#patch-/work/api/v2/customers/-customerId-/libraries/-libraryId-/documents/-docId-
 
 
