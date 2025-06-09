@@ -1,0 +1,127 @@
+<#  
+    Purpose:  
+    This PowerShell script tests the connection to iManage Work using credentials stored in a separate parameter file.  
+    It reads the parameter file, authenticates with iManage Work using OAuth2, retrieves an access token, and  
+    verifies the connection. The script includes error handling and logging.
+
+    Sample `params.txt` file format (stored at `C:\Config\params.txt`):
+    ---------------------------------------------------
+    username=ABC
+    password=yourpassword
+    client_id=CLIENT123
+    client_secret=SECRET456
+    work_server=your-imanage-instance.com
+    ---------------------------------------------------
+
+    **Prerequisites:**  
+    1. **PowerShell Version:** Ensure you are running **PowerShell 7 or later**. Check using:
+       ```powershell
+       $PSVersionTable.PSVersion
+       ```
+       Install PowerShell from [Microsoft PowerShell](https://blog.netwrix.com/how-to-run-powershell-script).
+
+    2. **Internet Access:** The script communicates with iManage Work API over HTTPS.
+
+    3. **API Credentials:**  
+       - Obtain a **client ID, client secret, username, and password** from your iManage administrator.
+       - Ensure you have **API access permissions**.
+
+    4. **Install `Invoke-RestMethod` module:** PowerShell includes this by default, but verify its availability:
+       ```powershell
+       Get-Command Invoke-RestMethod
+       ```
+
+    **Installation Steps:**
+    1. **Install PowerShell (if not installed)**  
+       - Download PowerShell from [Microsoft PowerShell](https://blog.netwrix.com/how-to-run-powershell-script).
+       - Install it following the setup instructions.
+
+    2. **Set Execution Policy**  
+       - Open PowerShell as Administrator.
+       - Run the following command to allow script execution:
+         ```powershell
+         Set-ExecutionPolicy RemoteSigned
+         ```
+       - Choose `Y` when prompted.
+
+    3. **Create Parameter File (`params.txt`)**  
+       - Save the file at `C:\Config\params.txt`.
+       - Add credentials in the format shown above.
+
+    4. **Run the Script**  
+       - Open PowerShell and navigate to the script location:
+         ```powershell
+         cd C:\Scripts
+         ```
+       - Execute the script:
+         ```powershell
+         .\imanage_test.ps1
+         ```
+       - Check the log file (`C:\Logs\iManage_API_Log.txt`) for execution details.
+#>
+
+# Define the parameter file path
+$paramFile = "C:\Config\params.txt"
+
+# Read the parameter file and convert to a Hashtable
+$parameters = @{}
+
+Get-Content $paramFile | ForEach-Object {
+    $key, $value = $_.Split("=")
+    $parameters[$key.Trim()] = $value.Trim()
+}
+
+# Extract parameters for use in the script
+$username = $parameters["username"]
+$password = $parameters["password"]
+$clientId = $parameters["client_id"]
+$clientSecret = $parameters["client_secret"]
+$workServer = $parameters["work_server"]
+
+# Define iManage authentication URL
+$oauthUri = "https://$workServer/auth/oauth2/token"
+
+# Log file location
+$logFile = "C:\Logs\iManage_API_Log.txt"
+
+# Function to log messages with timestamp
+Function Write-Log {
+    param ([string]$message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $logFile -Value "$timestamp - $message"
+}
+
+Write-Log "Starting iManage connection test..."
+
+# Create authentication request body
+$authBody = @{
+    "username"     = $username
+    "password"     = $password
+    "grant_type"   = "password"
+    "client_id"    = $clientId
+    "client_secret"= $clientSecret
+    "scope"        = "admin"
+}
+
+# Step 2: Authenticate and retrieve OAuth Token
+try {
+    Write-Log "Requesting OAuth Token..."
+    $tokenResponse = Invoke-RestMethod -Uri $oauthUri -Method Post -Body $authBody -ContentType "application/x-www-form-urlencoded"
+
+    # Validate token retrieval
+    if ($tokenResponse.access_token) {
+        Write-Log "Successfully connected to iManage Work!"
+        Write-Output "Successfully connected to iManage Work!"
+    } else {
+        Write-Log "ERROR: Authentication failed. Check credentials."
+        Write-Output "Authentication failed. Check credentials."
+        Exit 1
+    }
+}
+catch {
+    Write-Log "ERROR: Unable to connect to iManage Work - $_"
+    Write-Output "ERROR: Unable to connect to iManage Work - $_"
+    Exit 1
+}
+
+Write-Log "iManage connection test completed successfully."
