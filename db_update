@@ -3,6 +3,13 @@
     SELECT @ColumnList = STRING_AGG(CONCAT(''' | ', COLUMN_NAME, ': ''', ' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))'), ', ')
     FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName AND COLUMN_NAME <> 'ID';
 
+    -- Generate column concatenation per row, including ID
+    SELECT @ColumnList = STRING_AGG(CONCAT(COLUMN_NAME, ': ''', CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX)), ''''), ', ')
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName AND COLUMN_NAME <> 'Column2';
+
+    -- Generate dynamic SQL to process each row separately
+    SET @SQL = 'INSERT INTO X (ID, Column2, ConcatenatedData)
+                SELECT ID, NULL, CONCAT(''ID: '', ID, '' | '', (SELECT ' + @ColumnList + ' FROM ' + @TableName + ' WHERE ' + @TableName + '.ID = X.ID FOR XML PATH(''''))) FROM ' + @TableName;
 
 
 DECLARE @Tables TABLE (TableName NVARCHAR(100));
