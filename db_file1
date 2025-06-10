@@ -1,0 +1,33 @@
+
+CREATE TABLE X (
+    ID INT PRIMARY KEY,
+    ConcatenatedData NVARCHAR(MAX)
+);
+
+
+DECLARE @TableName NVARCHAR(100), @SQL NVARCHAR(MAX), @ColumnList NVARCHAR(MAX);
+DECLARE @Tables TABLE (TableName NVARCHAR(100));
+INSERT INTO @Tables VALUES ('Table1'), ('Table2'), ('Table3'), ('Table4'), ('Table5');
+
+-- Iterate over each table
+DECLARE TableCursor CURSOR FOR SELECT TableName FROM @Tables;
+OPEN TableCursor;
+FETCH NEXT FROM TableCursor INTO @TableName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    -- Generate column concatenation
+    SELECT @ColumnList = STRING_AGG(''' | ' + COLUMN_NAME + ': '' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))', '') 
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName;
+
+    -- Generate dynamic SQL for each table
+    SET @SQL = 'INSERT INTO X (ID, ConcatenatedData)
+                SELECT ID, (SELECT ' + @ColumnList + ' FROM ' + @TableName + ' FOR XML PATH('''')) FROM ' + @TableName;
+
+    EXEC sp_executesql @SQL;
+    
+    FETCH NEXT FROM TableCursor INTO @TableName;
+END;
+
+CLOSE TableCursor;
+DEALLOCATE TableCursor;
