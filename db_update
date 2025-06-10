@@ -1,4 +1,10 @@
 
+   -- Generate column concatenation dynamically
+    SELECT @ColumnList = STRING_AGG(CONCAT(''' | ', COLUMN_NAME, ': ''', ' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))'), ', ')
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName AND COLUMN_NAME <> 'ID';
+
+
+
 DECLARE @Tables TABLE (TableName NVARCHAR(100));
 
 INSERT INTO @Tables (TableName)
