@@ -1,0 +1,27 @@
+import pyodbc
+import pandas as pd
+
+# Define SQL Server connection details
+server = "YourSQLServer"  # Replace with actual server name
+database = "YourDatabase"  # Replace with actual database name
+username = "YourUsername"  # Replace with actual SQL login
+password = "YourPassword"  # Replace with actual password
+
+# Dictionary mapping filenames (with full paths) to queries
+queries = {
+    "C:/Reports/employees.csv": "SELECT id, name, salary FROM Employees WHERE salary > 50000",
+    "C:/Reports/departments.csv": "SELECT dept_id, dept_name FROM Departments",
+    "C:/Reports/projects.csv": "SELECT project_id, project_name, budget FROM Projects"
+}
+
+# Establish connection to SQL Server
+conn = pyodbc.connect(f"DRIVER={{SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}")
+
+# Execute queries and save output to specified paths
+for filename, query in queries.items():
+    df = pd.read_sql(query, conn)
+    df.to_csv(filename, index=False)
+    print(f"✅ Query result saved to {filename}")
+
+# Close connection
+conn.close()
