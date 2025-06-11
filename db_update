@@ -1,3 +1,18 @@
+    -- Generate column concatenation dynamically (excluding cs_doc_id)
+    SELECT @ColumnList = STRING_AGG(''' | ' + COLUMN_NAME + ': '' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))', ', ')
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName 
+    AND COLUMN_NAME NOT IN ('cs_doc_id', 'Column2'); -- Excluding cs_doc_id
+
+    -- Generate dynamic SQL for inserting concatenated data into doc_id_comments
+    SET @SQL = 'INSERT INTO doc_id_comments (cs_doc_id, iManageDocID, ConcatenatedData)
+                SELECT cs_doc_id, NULL, (SELECT ' + @ColumnList + ' FOR XML PATH('''')) FROM ' + @TableName;
+
+    PRINT @SQL; -- Debugging step to verify the generated SQL
+
+    EXEC sp_executesql @SQL;
+
+
+
 DECLARE @TableName NVARCHAR(100), @SQL NVARCHAR(MAX), @ColumnList NVARCHAR(MAX);
 DECLARE @Tables TABLE (TableName NVARCHAR(100));
 
