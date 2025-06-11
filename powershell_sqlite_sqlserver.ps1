@@ -1,23 +1,22 @@
 # -------------------------
-# PowerShell Script: SQLite to SQL Server Migration
+# PowerShell Script: SQLite to SQL Server Migration (Using Login & Password)
 # Prerequisites:
 # 1. Install PowerShell SQL Server Module:
 #    Run: Install-Module -Name SqlServer -Scope CurrentUser -Force
 # 2. Install SQLite Database Engine:
 #    Download: https://system.data.sqlite.org/index.html/doc/trunk/www/downloads.wiki
-# 3. Ensure SQL Server is running and accessible with proper permissions.
+# 3. Ensure SQL Server is running and accessible remotely with proper permissions.
 # 4. Run PowerShell as Administrator.
-# Get-Service | Where-Object {$_.DisplayName -like "SQL Server*"}
-# $connectionString = "Server=YourRemoteSQLServer;Database=YourDatabase;UID=YourUser;PWD=YourPassword;"
+# -------------------------
 
+# Define SQL Server connection parameters (with username/password authentication)
+$server = "YourRemoteSQLServer"  # Replace with actual server name
+$database = "YourDatabase"  # Replace with actual database name
+$username = "YourUsername"  # Replace with actual SQL login
+$password = "YourPassword"  # Replace with actual password
+$connectionString = "Server=$server;Database=$database;UID=$username;PWD=$password;"
 
-
-# Define SQL Server connection parameters
-$server = "XX"  # SQL Server Name
-$database = "DB"  # Target Database
-$connectionString = "Server=$server;Database=$database;Integrated Security=True"
-
-# Load SQL module (Ensure SqlServer is installed)
+# Load SQL module
 Import-Module SqlServer
 
 # Define SQLite database paths
@@ -61,18 +60,18 @@ foreach ($dbFile in $sqliteDatabases) {
             # Generate table creation SQL for SQL Server
             $columnDefinitions = ($dataTable.Columns | ForEach-Object { "[$($_.ColumnName)] NVARCHAR(MAX)" }) -join ", "
             $createQuery = "IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$newTableName') CREATE TABLE $newTableName ($columnDefinitions)"
-            Invoke-Sqlcmd -ServerInstance $server -Database $database -Query $createQuery
+            Invoke-Sqlcmd -ConnectionString $connectionString -Query $createQuery
 
             # Bulk Insert Data into SQL Server
             foreach ($row in $dataTable.Rows) {
                 $values = ($dataTable.Columns | ForEach-Object { "'$($row[$_.ColumnName].ToString())'" }) -join ", "
                 $insertQuery = "INSERT INTO $newTableName ($($dataTable.Columns.ColumnName -join ', ')) VALUES ($values)"
-                Invoke-Sqlcmd -ServerInstance $server -Database $database -Query $insertQuery
+                Invoke-Sqlcmd -ConnectionString $connectionString -Query $insertQuery
             }
 
             # Indexing for performance
             $indexQuery = "CREATE INDEX IX_$newTableName ON $newTableName ($($dataTable.Columns[0].ColumnName))"
-            Invoke-Sqlcmd -ServerInstance $server -Database $database -Query $indexQuery
+            Invoke-Sqlcmd -ConnectionString $connectionString -Query $indexQuery
 
             Write-Host "✅ $newTableName migrated successfully!"
         }
