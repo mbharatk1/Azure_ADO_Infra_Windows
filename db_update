@@ -1,4 +1,29 @@
-    -- Generate column concatenation dynamically (excluding cs_doc_id)
+BEGIN TRANSACTION;
+
+-- Step 1: Insert concatenated data into doc_id_comments (avoiding duplicates)
+INSERT INTO doc_id_comments (cs_doc_id, iManageDocID, ConcatenatedData)
+SELECT cs_doc_id, NULL, (SELECT STRING_AGG(CONCAT(COLUMN_NAME, ': ', CAST([COLUMN_NAME] AS NVARCHAR(MAX))), ', ') 
+                         FROM INFORMATION_SCHEMA.COLUMNS 
+                         WHERE TABLE_NAME = t.TableName AND COLUMN_NAME <> 'cs_doc_id'
+                        FOR XML PATH(''))
+FROM (SELECT DISTINCT TABLE_NAME AS TableName FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE') t
+WHERE NOT EXISTS (
+    SELECT 1 FROM doc_id_comments dc WHERE dc.cs_doc_id = t.TableName
+);
+
+-- Step 2: Update iManageDocID in doc_id_comments using data from XX
+UPDATE doc_id_comments
+SET doc_id_comments.iManageDocID = XX.iManageDocID
+FROM doc_id_comments
+INNER JOIN XX ON doc_id_comments.cs_doc_id = XX.cs_doc_id;
+
+-- Commit transaction if all steps succeed
+COMMIT TRANSACTION;
+
+
+
+
+-- Generate column concatenation dynamically (excluding cs_doc_id)
     SELECT @ColumnList = STRING_AGG(''' | ' + COLUMN_NAME + ': '' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))', ', ')
     FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName 
     AND COLUMN_NAME NOT IN ('cs_doc_id', 'Column2'); -- Excluding cs_doc_id
