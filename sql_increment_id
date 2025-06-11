@@ -1,0 +1,25 @@
+WITH RecordCounts AS (
+    -- Calculate number of records for each table
+    SELECT 'X' AS TableName, COUNT(*) AS TotalRecords FROM X
+    UNION ALL
+    SELECT 'Y' AS TableName, COUNT(*) AS TotalRecords FROM Y
+    UNION ALL
+    SELECT 'Z' AS TableName, COUNT(*) AS TotalRecords FROM Z
+),
+NumberSeries AS (
+    -- Generate a sequence up to the highest number required
+    SELECT ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS Num
+    FROM sys.all_objects
+),
+FinalData AS (
+    -- Combine records from all tables with their respective BaseText & Year
+    SELECT id, BaseText, Year, 'X' AS TableName FROM X
+    UNION ALL
+    SELECT id, BaseText, Year, 'Y' AS TableName FROM Y
+    UNION ALL
+    SELECT id, BaseText, Year, 'Z' AS TableName FROM Z
+)
+SELECT fd.id, CONCAT(fd.BaseText, '-', fd.Year, '-', ns.Num) AS GeneratedText, fd.TableName
+FROM FinalData fd
+INNER JOIN NumberSeries ns ON ns.Num <= (SELECT TotalRecords FROM RecordCounts WHERE TableName = fd.TableName)
+ORDER BY fd.TableName, fd.id, ns.Num;
