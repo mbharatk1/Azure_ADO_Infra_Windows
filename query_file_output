@@ -1,0 +1,28 @@
+import pyodbc
+import pandas as pd
+
+# Define SQL Server connection credentials
+server = "YourSQLServer"  # Replace with actual server name
+database = "YourDatabase"  # Replace with actual database name
+username = "YourUsername"  # Replace with actual SQL login
+password = "YourPassword"  # Replace with actual password
+
+# Read SQL queries from a flat file
+sql_file = "queries.txt"  # Replace with actual file path
+with open(sql_file, "r") as f:
+    queries = f.read().split(";")  # Split queries by semicolon
+
+# Establish connection to SQL Server
+conn = pyodbc.connect(f"DRIVER={{SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}")
+cursor = conn.cursor()
+
+# Execute queries and save outputs
+for i, query in enumerate(queries):
+    query = query.strip()
+    if query:  # Ensure it's not an empty line
+        df = pd.read_sql(query, conn)
+        df.to_csv(f"output_{i+1}.csv", index=False)  # Save as CSV
+
+# Close connection
+conn.close()
+print("✅ SQL queries executed and results saved as CSV!")
