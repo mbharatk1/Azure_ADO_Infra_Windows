@@ -7,7 +7,8 @@
 #    Download: https://system.data.sqlite.org/index.html/doc/trunk/www/downloads.wiki
 # 3. Ensure SQL Server is running and accessible with proper permissions.
 # 4. Run PowerShell as Administrator.
-# -------------------------
+# Get-Service | Where-Object {$_.DisplayName -like "SQL Server*"}
+
 
 # Define SQL Server connection parameters
 $server = "XX"  # SQL Server Name
