@@ -23,3 +23,24 @@ SELECT fd.id, CONCAT(fd.BaseText, '-', fd.Year, '-', ns.Num) AS GeneratedText, f
 FROM FinalData fd
 INNER JOIN NumberSeries ns ON ns.Num <= (SELECT TotalRecords FROM RecordCounts WHERE TableName = fd.TableName)
 ORDER BY fd.TableName, fd.id, ns.Num;
+
+
+====================
+
+new one
+
+
+WITH FinalData AS (
+    -- Merge records from multiple tables while keeping distinct IDs & metadata
+    SELECT id, BaseText, Year, 'X' AS TableName FROM X
+    UNION ALL
+    SELECT id, BaseText, Year, 'Y' AS TableName FROM Y
+    UNION ALL
+    SELECT id, BaseText, Year, 'Z' AS TableName FROM Z
+)
+SELECT id, TableName, 
+       CONCAT(BaseText, '-', Year, '-', ROW_NUMBER() OVER (PARTITION BY TableName ORDER BY id)) AS GeneratedText
+FROM FinalData
+ORDER BY TableName, id;
+
+
