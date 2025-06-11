@@ -1,0 +1,115 @@
+HOW to retrieve Matter, Workspace and Document metadata to see which ones can be updated using an API
+
+DOCUMENT
+Invoke-RestMethod -Method Get -Uri "https://yourserver/api/v2/customers/{customerId}/libraries/{libraryId}/documents/{documentId}" -Header $header
+
+
+Matter
+Invoke-RestMethod -Method Get -Uri "https://yourserver/api/v2/customers/{customerId}/libraries/{libraryId}/matters/{matterId}" -Header $header
+
+Workspace
+Invoke-RestMethod -Method Get -Uri "https://yourserver/api/v2/customers/{customerId}/libraries/{libraryId}/workspaces/{workspaceId}" -Header $header
+
+
+
+Foe Document
+# Enable TLS 1.2 for secure API communication
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Define authentication details
+$server = "yourserver.imanage.work"  # iManage server URL
+$libraryId = "yourLibraryId"          # Library ID
+$customerId = "yourCustomerId"        # Customer ID
+$documentId = "yourDocumentId"        # Document ID
+
+# Store credentials directly (⚠️ Not recommended for security)
+$username = "yourAdminUser"            # Virtual admin user
+$password = "yourPassword123"          # Plain text password (⚠️ Security Risk)
+$client_id = "yourClientID"
+$client_secret = "yourClientSecret"
+
+# Define API Headers
+$header = @{
+    "Accept" = "application/json"
+}
+
+# Step 1: Authenticate with iManage to get Access Token
+Write-Host "🔄 Signing in to iManage API..."
+$body = @{
+    "username" = $username
+    "password" = $password
+    "grant_type" = "password"
+    "client_id" = $client_id
+    "client_secret" = $client_secret
+    "scope" = "admin"
+}
+
+try {
+    $response = Invoke-RestMethod -Method Post -Uri "https://$server/auth/oauth2/token" -Body $body
+    $x_auth_token = $response.access_token  # Extract authentication token
+    $header["X-Auth-Token"] = $x_auth_token
+    Write-Host "✅ Authentication successful!"
+} catch {
+    Write-Host "❌ Failed to authenticate. Check credentials!"
+    exit
+}
+
+# Step 2: Retrieve Document Metadata
+Write-Host "🔄 Fetching document metadata..."
+try {
+    $documentMetadata = Invoke-RestMethod -Method Get -Uri "https://$server/api/v2/customers/$customerId/libraries/$libraryId/documents/$documentId" -Header $header
+    Write-Host "✅ Document metadata retrieved successfully!"
+} catch {
+    Write-Host "❌ Error retrieving metadata!"
+    exit
+}
+
+# Step 3: Save metadata to a CSV file
+Write-Host "🔄 Saving metadata to CSV..."
+$documentMetadata | Export-Csv -Path "C:\Documents_Metadata.csv" -NoTypeInformation
+Write-Host "✅ Metadata saved to C:\Documents_Metadata.csv"
+
+# Step 4: Sign Out
+Write-Host "🔄 Logging out..."
+try {
+    Invoke-RestMethod -Method Get -Uri "https://$server/login/terminate" -Header $header
+    Write-Host "✅ Signed out successfully!"
+} catch {
+    Write-Host "❌ Error signing out!"
+}
+
+Write-Host "🚀 Process completed!"
+
+
+
+---------------------------------------------------------------------------------
+Workspace 
+---------------------------------------------------------------------------------
+$customerId = "yourCustomerId"
+$libraryId = "yourLibraryId"
+$workspaceId = "yourWorkspaceId"
+
+$header = @{ "X-Auth-Token" = $x_auth_token; "Accept" = "application/json" }
+
+# Fetch workspace metadata
+$workspaceMetadata = Invoke-RestMethod -Method Get -Uri "https://$server/api/v2/customers/$customerId/libraries/$libraryId/workspaces/$workspaceId" -Header $header
+$workspaceMetadata | Format-List
+
+$workspaceMetadata | Export-Csv -Path "C:\iManage_Workspaces.csv" -NoTypeInformation
+
+---------------------------------------------------------------------------------
+Matter
+---------------------------------------------------------------------------------
+
+$matterId = "yourMatterId"
+
+# Fetch matter metadata
+$matterMetadata = Invoke-RestMethod -Method Get -Uri "https://$server/api/v2/customers/$customerId/libraries/$libraryId/matters/$matterId" -Header $header
+$matterMetadata | Format-List
+
+$matterMetadata | Export-Csv -Path "C:\iManage_Matters.csv" -NoTypeInformation
+
+
+
+
+
