@@ -1,0 +1,11 @@
+DECLARE @BaseText NVARCHAR(20) = '12345678';
+DECLARE @Year INT = 2025;
+DECLARE @MaxRecords INT = 10; -- Set 'n' dynamically
+
+WITH NumberSeries AS (
+    SELECT 1 AS Num
+    UNION ALL
+    SELECT Num + 1 FROM NumberSeries WHERE Num < @MaxRecords
+)
+SELECT CONCAT(@BaseText, '-', @Year, '-', Num) AS GeneratedText
+FROM NumberSeries;
