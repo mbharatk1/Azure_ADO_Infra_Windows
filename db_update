@@ -1,3 +1,36 @@
+DECLARE @TableName NVARCHAR(100), @SQL NVARCHAR(MAX), @ColumnList NVARCHAR(MAX);
+DECLARE @Tables TABLE (TableName NVARCHAR(100));
+
+-- Retrieve all table names dynamically
+INSERT INTO @Tables (TableName)
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';
+
+-- Iterate over each table
+DECLARE TableCursor CURSOR FOR SELECT TableName FROM @Tables;
+OPEN TableCursor;
+FETCH NEXT FROM TableCursor INTO @TableName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    -- Generate column concatenation per row, including ID
+    SET @ColumnList = '';
+    SELECT @ColumnList = STRING_AGG(''' | ' + COLUMN_NAME + ': '' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))', '') 
+    FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @TableName AND COLUMN_NAME NOT IN ('Column2');
+
+    -- Ensure correct SELECT structure and format the query
+    SET @SQL = 'INSERT INTO X (ID, Column2, ConcatenatedData)
+                SELECT ID, NULL, CONCAT(''ID: '', ID, '' | '', (SELECT ' + @ColumnList + ' FOR XML PATH(''''))) 
+                FROM ' + @TableName;
+
+    PRINT @SQL; -- Debugging: Check generated SQL before execution
+
+    EXEC sp_executesql @SQL;
+
+    FETCH NEXT FROM TableCursor INTO @TableName;
+END;
+
+CLOSE TableCursor;
+DEALLOCATE TableCursor;
 
    -- Generate column concatenation dynamically
     SELECT @ColumnList = STRING_AGG(CONCAT(''' | ', COLUMN_NAME, ': ''', ' + CAST([' + COLUMN_NAME + '] AS NVARCHAR(MAX))'), ', ')
