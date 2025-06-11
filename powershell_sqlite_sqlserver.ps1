@@ -8,6 +8,8 @@
 # 3. Ensure SQL Server is running and accessible with proper permissions.
 # 4. Run PowerShell as Administrator.
 # Get-Service | Where-Object {$_.DisplayName -like "SQL Server*"}
+# $connectionString = "Server=YourRemoteSQLServer;Database=YourDatabase;UID=YourUser;PWD=YourPassword;"
+
 
 
 # Define SQL Server connection parameters
