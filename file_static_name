@@ -1,0 +1,44 @@
+import pyodbc
+import pandas as pd
+import logging
+
+# Configure logging
+logging.basicConfig(filename="sql_execution.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Define SQL Server connection details
+server = "YourSQLServer"  # Replace with actual server name
+database = "YourDatabase"  # Replace with actual database name
+username = "YourUsername"
+password = "YourPassword"
+
+# Define query and output file name in the same script
+query_info = {
+    "query": """SELECT id, name, salary 
+                FROM Employees 
+                WHERE salary > 50000 
+                ORDER BY id""",
+    "filename": "output.csv"
+}
+
+# Establish connection to SQL Server
+try:
+    conn = pyodbc.connect(f"DRIVER={{SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}")
+    logging.info("✅ Connected to SQL Server.")
+except Exception as e:
+    logging.error(f"❌ SQL Server connection failed: {e}")
+    exit()
+
+# Execute the query and save output
+try:
+    df = pd.read_sql(query_info["query"], conn)
+    df.to_csv(query_info["filename"], index=False)
+    logging.info(f"✅ Query executed successfully. Output saved to {query_info['filename']}")
+    print(f"✅ Query result saved to {query_info['filename']}")
+except Exception as e:
+    logging.error(f"❌ Query execution failed: {e}")
+    print("❌ Error executing query. Check 'sql_execution.log'.")
+
+# Close connection
+conn.close()
+logging.info("✅ SQL Server connection closed.")
+print("🚀 Process completed! Check 'sql_execution.log' for details.")
