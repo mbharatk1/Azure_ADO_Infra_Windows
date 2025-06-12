@@ -1,0 +1,64 @@
+import pyodbc
+import pandas as pd
+import logging
+
+# Configure logging
+logging.basicConfig(filename="sql_execution.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Define SQL Server connection details
+server = "YourSQLServer"  # Replace with actual server name
+database = "YourDatabase"  # Replace with actual database name
+username = "YourUsername"
+password = "YourPassword"
+
+# List of queries with filenames
+queries = [
+    {
+        "query": """SELECT id, name, salary 
+                    FROM Employees 
+                    WHERE salary > 50000 
+                    ORDER BY id""",
+        "filename": "employees.csv"
+    },
+    {
+        "query": """SELECT dept_id, dept_name 
+                    FROM Departments 
+                    ORDER BY dept_name""",
+        "filename": "departments.csv"
+    },
+    {
+        "query": """SELECT project_id, project_name, budget 
+                    FROM Projects 
+                    ORDER BY budget DESC""",
+        "filename": "projects.csv"
+    }
+]
+
+# Establish connection to SQL Server
+try:
+    conn = pyodbc.connect(f"DRIVER={{SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}")
+    logging.info("✅ Connected to SQL Server.")
+except Exception as e:
+    logging.error(f"❌ SQL Server connection failed: {e}")
+    exit()
+
+# Execute queries and save outputs
+for query_info in queries:
+    filename = query_info["filename"]
+    query = query_info["query"]
+    
+    try:
+        df = pd.read_sql(query, conn)
+        df.to_csv(filename, index=False, header=False)  # Removes headers
+        with open(filename, "a") as file:
+            file.write("\n")  # Adds blank line at the bottom
+        logging.info(f"✅ Query executed successfully. Output saved to {filename}")
+        print(f"✅ Query result saved to {filename}")
+    except Exception as e:
+        logging.error(f"❌ Query execution failed for {filename}: {e}")
+        print(f"❌ Error executing query for {filename}. Check 'sql_execution.log'.")
+
+# Close connection
+conn.close()
+logging.info("✅ SQL Server connection closed.")
+print("🚀 Process completed! Check 'sql_execution.log' for details.")
