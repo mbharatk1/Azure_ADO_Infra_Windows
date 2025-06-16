@@ -94,6 +94,8 @@ catch {
 $workspaceHierarchy = @{}
 
 foreach ($workspace in $workspaceResponse) {
+$matterClass = if ($workspace.PSObject.Properties['custom2']) { $workspace.custom2 } else { "Unknown" }
+
     $matterClass = $workspace.custom2  # Assuming 'custom2' holds Matter Class
     $workspaceId = $workspace.id
     $workspaceName = $workspace.name
