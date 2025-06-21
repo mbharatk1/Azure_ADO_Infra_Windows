@@ -1,0 +1,22 @@
+import sqlite3
+import csv
+
+# Step 1: Connect to the SQLite database
+conn = sqlite3.connect("a.db")
+cursor = conn.cursor()
+
+# Step 2: Query the specific columns from table 'd'
+cursor.execute("SELECT e1, e2, e4 FROM d")
+rows = cursor.fetchall()
+
+# Step 3: Write the result to a CSV file
+with open("XYZ.csv", "w", newline='', encoding="utf-8") as file:
+    writer = csv.writer(file)
+    writer.writerow(["e1", "e2", "e4"])  # Header row
+    writer.writerows(rows)
+
+# Step 4: Clean up
+cursor.close()
+conn.close()
+
+print("✅ Data exported to XYZ.csv successfully!")
