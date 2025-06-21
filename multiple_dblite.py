@@ -23,3 +23,10 @@ for item in queries:
 
     except Exception as e:
         print(f"❌ Error with {db}: {e}")
+
+
+queries = [
+    {'db': 'a.db', 'query': 'SELECT * FROM a', 'filename': r'c:\abc.txt'},
+    {'db': 'b.db', 'query': 'SELECT * FROM b', 'filename': r'c:\abc1.txt'},
+    {'db': 'c.db', 'query': 'SELECT * FROM v', 'filename': r'c:\abc2.txt'}
+]
