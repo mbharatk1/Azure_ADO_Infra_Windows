@@ -1,0 +1,148 @@
+Using JSON  ( nsg-rules.json )
+========================================
+
+[
+  {
+    "Name": "AllowCustomInbound",
+    "Priority": 1000,
+    "Ports": "8080,443",
+    "Protocol": "*",
+    "SourceAddresses": ["1.1.1.1", "1.1.1.2"],
+    "DestinationAddresses": ["10.0.0.4"],
+    "Description": "Allow 8080,443 from 1.1.1.1/1.1.1.2 to 10.0.0.4"
+  },
+  {
+    "Name": "rule2_ports_65001",
+    "Priority": 1050,
+    "Ports": "65001,65000",
+    "Protocol": "Tcp",
+    "SourceAddresses": ["1.1.2.2", "1.1.2.3"],
+    "DestinationAddresses": ["10.0.0.5"],
+    "Description": "Allow 65001,65000 from 1.1.2.2/1.1.2.3 to 10.0.0.5"
+  },
+  {
+    "Name": "AllowAzureLoadBalancer",
+    "Priority": 1100,
+    "Ports": "*",
+    "Protocol": "*",
+    "SourceAddresses": ["AzureLoadBalancer"],
+    "DestinationAddresses": ["*"],
+    "Description": "Allow Azure Load Balancer traffic"
+  }
+]
+========================================
+powershell script
+========================================
+
+# NSG and resource group
+$ResourceGroupName = "myResourceGroup"
+$NSGName = "myNSG"
+$JsonFilePath = ".\nsg-rules.json"
+
+# Load rules from JSON
+try {
+    $rules = Get-Content $JsonFilePath | ConvertFrom-Json
+    Write-Host "Loaded $($rules.Count) rule definitions from $JsonFilePath"
+}
+catch {
+    Write-Host "Error loading JSON file: $_"
+    exit 1
+}
+
+# Load NSG
+try {
+    $nsg = Get-AzNetworkSecurityGroup -ResourceGroupName $ResourceGroupName -Name $NSGName
+    Write-Host "Loaded NSG: $NSGName"
+}
+catch {
+    Write-Host "Failed to load NSG '$NSGName': $_"
+    exit 1
+}
+
+# Apply each rule
+foreach ($rule in $rules) {
+    $existing = $nsg.SecurityRules | Where-Object { $_.Name -eq $rule.Name }
+
+    if ($existing) {
+        Write-Host "Updating rule: $($rule.Name)"
+        $existing.SourceAddressPrefixes = $rule.SourceAddresses
+        $existing.DestinationAddressPrefixes = $rule.DestinationAddresses
+        $existing.DestinationPortRanges = ($rule.Ports -split ",")
+        $existing.Access = "Allow"
+        $existing.Direction = "Inbound"
+        $existing.Priority = $rule.Priority
+        $existing.Protocol = $rule.Protocol
+        $existing.Description = $rule.Description
+
+        try {
+            Set-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $nsg -SecurityRule $existing
+        }
+        catch {
+            Write-Host "Error updating rule '$($rule.Name)': $_"
+            throw
+        }
+    }
+    else {
+        Write-Host "Creating rule: $($rule.Name)"
+        try {
+            $newRule = New-AzNetworkSecurityRuleConfig `
+                -Name $rule.Name `
+                -Description $rule.Description `
+                -Access Allow `
+                -Protocol $rule.Protocol `
+                -Direction Inbound `
+                -Priority $rule.Priority `
+                -SourceAddressPrefixes $rule.SourceAddresses `
+                -SourcePortRange "*" `
+                -DestinationAddressPrefixes $rule.DestinationAddresses `
+                -DestinationPortRanges ($rule.Ports -split ",")
+
+            $nsg.SecurityRules.Add($newRule)
+        }
+        catch {
+            Write-Host "Error creating rule '$($rule.Name)': $_"
+            throw
+        }
+    }
+}
+
+# Save changes to NSG
+try {
+    Set-AzNetworkSecurityGroup -NetworkSecurityGroup $nsg
+    Write-Host "All rule updates applied to NSG: $NSGName"
+}
+catch {
+    Write-Host "Failed to save NSG '$NSGName': $_"
+    throw
+}
+
+
+==================================== YML file ===============================
+Azure DevOps Pipeline (azure-pipelines.yml)
+==================================== YML file ===============================
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  resourceGroupName: 'myResourceGroup'
+  nsgName: 'myNSG'
+  jsonFile: 'nsg-rules.json'
+
+steps:
+- task: AzurePowerShell@5
+  inputs:
+    azureSubscription: '<YOUR-AZURE-SERVICE-CONNECTION>'
+    ScriptPath: 'update-nsg.ps1'
+    ScriptArguments: >
+      -ResourceGroupName $(resourceGroupName)
+      -NSGName $(nsgName)
+      -JsonFilePath $(jsonFile)
+    azurePowerShellVersion: 'LatestVersion'
+    pwsh: true
+
+
