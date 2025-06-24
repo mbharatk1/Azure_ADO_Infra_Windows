@@ -1,0 +1,20 @@
+trigger:
+  none  # or set to your desired branch if you want it to auto-trigger
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- task: AzurePowerShell@5
+  displayName: 'Restart Windows VM'
+  inputs:
+    azureSubscription: '<YOUR-AZURE-SERVICE-CONNECTION>'
+    ScriptType: 'InlineScript'
+    Inline: |
+      $resourceGroup = 'myResourceGroup'
+      $vmName = 'myWindowsVM'
+
+      Write-Host "Restarting VM: $vmName"
+      Restart-AzVM -ResourceGroupName $resourceGroup -Name $vmName -Force
+    azurePowerShellVersion: 'LatestVersion'
+    pwsh: true
