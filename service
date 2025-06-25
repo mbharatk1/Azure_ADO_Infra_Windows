@@ -1,0 +1,25 @@
+$logFile = "C:\Logs\service-config-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+
+function Write-Log {
+    param (
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $entry = "$timestamp [$Level] $Message"
+    Add-Content -Path $logFile -Value $entry
+    Write-Host $entry
+}
+
+# Example: Configure and start a service
+$serviceName = "abc"
+$username = "DOMAIN\user"
+$password = "YourPassword"
+
+Write-Log "Configuring service '$serviceName' with new credentials..."
+$cfgResult = sc.exe config $serviceName obj= "$username" password= "$password"
+Write-Log "Config result: $cfgResult"
+
+Write-Log "Starting service '$serviceName'..."
+$startResult = sc.exe start $serviceName
+Write-Log "Start result: $startResult"
