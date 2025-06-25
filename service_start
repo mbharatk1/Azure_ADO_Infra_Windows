@@ -1,0 +1,25 @@
+$serviceName = "SERVICEA"
+$timeoutSeconds = 60
+
+# Start the service
+Write-Host "Starting service '$serviceName'..."
+$startOutput = sc.exe start $serviceName
+$startOutput | ForEach-Object { Write-Host $_ }
+
+# Wait for the service to reach 'Running' state
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+while ($stopwatch.Elapsed.TotalSeconds -lt $timeoutSeconds) {
+    $status = (Get-Service -Name $serviceName).Status
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') - Current status: $status"
+
+    if ($status -eq 'Running') {
+        Write-Host "✅ Service '$serviceName' is now running."
+        break
+    }
+
+    Start-Sleep -Seconds 2
+}
+
+if ((Get-Service -Name $serviceName).Status -ne 'Running') {
+    Write-Host "❌ Timeout reached. Service '$serviceName' did not start."
+}
