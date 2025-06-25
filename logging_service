@@ -1,0 +1,35 @@
+$serviceName = "SERVICEA"
+$timeoutSeconds = 60
+$logPath = "F:\logging.txt"
+
+function Log {
+    param([string]$message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "$timestamp $message"
+    Write-Host $line
+    Add-Content -Path $logPath -Value $line
+}
+
+Log "Starting service '$serviceName'..."
+$startOutput = sc.exe start $serviceName
+$startOutput | ForEach-Object { Log $_ }
+
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$started = $false
+
+while ($stopwatch.Elapsed.TotalSeconds -lt $timeoutSeconds) {
+    $status = (Get-Service -Name $serviceName).Status
+    Log "Current status: $status"
+
+    if ($status -eq 'Running') {
+        Log " Service '$serviceName' is now running."
+        $started = $true
+        break
+    }
+
+    Start-Sleep -Seconds 2
+}
+
+if (-not $started) {
+    Log " Timeout reached. Service '$serviceName' did not start."
+}
