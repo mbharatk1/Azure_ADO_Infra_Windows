@@ -31,3 +31,21 @@ param (
 
 Write-Host "🔁 Restarting VM: $vmName"
 Restart-AzVM -ResourceGroupName "YourResourceGroup" -Name $vmName -Force
+
+------------
+
+param (
+    [string]$vmName
+)
+
+Write-Host "🔁 Attempting to restart VM: $vmName"
+
+try {
+    Restart-AzVM -ResourceGroupName "YourResourceGroup" -Name $vmName -Force -ErrorAction Stop
+    Write-Host "✅ Successfully restarted VM: $vmName"
+}
+catch {
+    Write-Error "❌ Failed to restart VM: $vmName. Error: $($_.Exception.Message)"
+    exit 1  # Optional: fail the pipeline if this script is used in Azure DevOps
+}
+
