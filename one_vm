@@ -1,0 +1,33 @@
+parameters:
+- name: vmName
+  displayName: 'Select the VM to restart'
+  type: string
+  default: 'one'
+  values:
+    - one
+    - two
+    - three
+
+trigger: none
+
+pool:
+  vmImage: 'windows-latest'
+
+jobs:
+- job: RestartSelectedVM
+  steps:
+  - task: AzurePowerShell@5
+    inputs:
+      azureSubscription: 'YourServiceConnection'
+      ScriptType: 'FilePath'
+      ScriptPath: 'restart-vm.ps1'
+      ScriptArguments: "-vmName ${{ parameters.vmName }}"
+      azurePowerShellVersion: 'LatestVersion'
+
+--------------------------------
+param (
+    [string]$vmName
+)
+
+Write-Host "🔁 Restarting VM: $vmName"
+Restart-AzVM -ResourceGroupName "YourResourceGroup" -Name $vmName -Force
