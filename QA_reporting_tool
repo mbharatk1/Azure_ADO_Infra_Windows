@@ -1,0 +1,40 @@
+https://help.imanage.com/hc/en-us/articles/19608709884571-iManage-Support-Universal-API-Reporting-Tool
+
+Setting up the reporting tool
+This section describes the sequence for setting up the reporting tool.
+
+Step 1: Setting up the iManage Control Center application
+This step differs for cloudimanage.com and imanage.work.
+
+NOTE: Authenticating with an account in the NRTADMIN group will allow for the best performance and ensure all content is accessible.
+
+In this section:
+For customers connecting to cloudimanage.com
+Examples for customers connecting to imanage.work
+For customers connecting to cloudimanage.com
+In iManage Control Center, go to Applications > Add Application > iManage Support - Reporting Tool.
+Select Authentication.
+Toggle Allow Refresh Token to Yes.
+Select Access, Review, and then Finish.
+The client ID is reporting_tool. No client secret is required.
+Continue to the Downloading and connecting the reporting tool section.
+Examples for customers connecting to imanage.work
+In iManage Control Center, go to Applications > Add Application > Configure Manually and fill in the fields below.
+Name: Reporting Tool
+API Key: reporting_tool
+API Secret: Select "Auto-Generate"
+Select Authentication.
+Application Type: Native
+Redirect URL: http://localhost/
+Toggle Allow Refresh Token to Yes.
+Select Access, Review, and then Finish.
+Step 2: Downloading and connecting the reporting tool
+Download Reporting_Tool.zip from iManage Share.
+Right-click on the ZIP file and select Properties.
+
+NOTE: The available custom search filters for each report can be found in the Reporting Tool Instructions.pdf included in the ZIP file.
+In the bottom right-hand corner, check the Unblock check box.
+Select Apply and then OK.
+Unzip the file and run ReportingTool.exe.
+Select the Settings tab and enter your host name (for example, cloudimanage.com or ppd12-mobility.imanage.work) and your library/database.
+Select Login.
